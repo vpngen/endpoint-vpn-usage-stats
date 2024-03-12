@@ -34,6 +34,7 @@ func main() {
 		},
 	}
 
+	// wireguard
 	wgTraffic, err := getWgTransfer(*wgi)
 	if err != nil {
 		logger.Fatal("wg show transfer:", err)
@@ -51,6 +52,37 @@ func main() {
 		logger.Fatal("wg show endpoints:", err)
 	}
 	mergePeers(res.Data.Endpoints, wgEndpoints)
+
+	//ipsec
+	file, err := os.Open("/etc/accel-ppp.chap-secrets." + *wgi)
+	if err != nil {
+		logger.Fatal("ipsec secrets file:", err)
+	}
+	username2peer, err := parseIpsecSecrets(file)
+	if err != nil {
+		logger.Fatal("parse ipsec secrets:", err)
+	}
+	if err = file.Close(); err != nil {
+		logger.Fatal("close ipsec secrets file:", err)
+	}
+
+	ipsecTraffic, err := getIpsecTraffic(*wgi, username2peer)
+	if err != nil {
+		logger.Fatal("ipsec traffic:", err)
+	}
+	mergePeers(res.Data.Traffic, ipsecTraffic)
+
+	mergePeers(res.Data.LastSeen, parseIpsecLastSeen(username2peer))
+
+	ipsecEndpoints, err := getIpsecEndpoints(*wgi, username2peer)
+	if err != nil {
+		logger.Fatal("ipsec endpoints:", err)
+	}
+	mergePeers(res.Data.Endpoints, ipsecEndpoints)
+
+	//cloak-openvpn
+
+	//outline-ss
 
 	encoder := json.NewEncoder(os.Stdout)
 	if *debug {
