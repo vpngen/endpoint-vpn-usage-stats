@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 )
 
 func main() {
-	wgi := flag.String("wgi", "", "wg interface, ex. wg0, required")
+	wgi := flag.String("wgi", "", "wg interface, e.g. wg0, required")
 	debug := flag.Bool("debug", false, "debug logging, indented json output")
 	flag.Parse()
 
@@ -53,7 +54,7 @@ func main() {
 	}
 	mergePeers(res.Data.Endpoints, wgEndpoints)
 
-	//ipsec
+	// ipsec
 	file, err := os.Open("/etc/accel-ppp.chap-secrets." + *wgi)
 	if err != nil {
 		logger.Fatal("ipsec secrets file:", err)
@@ -80,9 +81,31 @@ func main() {
 	}
 	mergePeers(res.Data.Endpoints, ipsecEndpoints)
 
-	//cloak-openvpn
+	// cloak-openvpn
+	statusFile, err := os.Open(fmt.Sprintf("/opt/openvpn-%s/status.log", *wgi))
+	if err != nil {
+		logger.Fatal("openvpn status file:", err)
+	}
+	peersReader, err := runcmd("grep", "-rH", "'^#'", fmt.Sprintf("/opt/openvpn-%s/ccd/", *wgi))
+	if err != nil {
+		logger.Fatal("openvpn peers file:", err)
+	}
+	status, err := getOpenVPNStatus(statusFile, peersReader)
+	if err != nil {
+		logger.Fatal("parse openvpn status:", err)
+	}
+	mergePeers(res.Data.Traffic, getOpenVPNTraffic(status))
 
-	//outline-ss
+	mergePeers(res.Data.LastSeen, getOpenVPNLastSeen(status))
+
+	authDbFile, err := os.Open(fmt.Sprintf("/opt/cloak-%s/userinfo/userauthdb.log", *wgi))
+	if err != nil {
+		logger.Fatal("openvpn authdb file:", err)
+	}
+	ovpnEndpoints, err := getOpenVPNEndpoints(authDbFile, status)
+	mergePeers(res.Data.Endpoints, ovpnEndpoints)
+
+	// outline-ss
 
 	encoder := json.NewEncoder(os.Stdout)
 	if *debug {
