@@ -106,7 +106,20 @@ func main() {
 	mergePeers(res.Data.Endpoints, ovpnEndpoints)
 
 	// outline-ss
+	outlineTraffic, err := getOutlineTraffic(*wgi)
+	if err != nil {
+		logger.Fatal("outline traffic:", err)
+	}
+	mergePeers(res.Data.Traffic, outlineTraffic)
 
+	outlineLastSeen, outlineEndpoints, err := getOutlineLastSeenAndEndpoints(*wgi)
+	if err != nil {
+		logger.Fatal("outline last seen and endpoints:", err)
+	}
+	mergePeers(res.Data.LastSeen, outlineLastSeen)
+	mergePeers(res.Data.Endpoints, outlineEndpoints)
+
+	// output
 	encoder := json.NewEncoder(os.Stdout)
 	if *debug {
 		encoder.SetIndent("", "  ")
