@@ -1,3 +1,7 @@
+# Build
+```
+go build .
+```
 # Usage
 ```
 Usage of ./endpoint-vpn-usage-stats:
