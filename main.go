@@ -13,6 +13,11 @@ func main() {
 	debug := flag.Bool("debug", false, "debug logging, indented json output")
 	flag.Parse()
 
+	if *wgi == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	var logFlags int
 	if *debug {
 		logFlags = log.Lshortfile
