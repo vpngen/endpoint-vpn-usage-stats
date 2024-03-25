@@ -91,7 +91,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("openvpn status file:", err)
 	}
-	peersReader, err := runcmd("grep", "-rH", "'^#'", fmt.Sprintf("/opt/openvpn-%s/ccd/", *wgi))
+	peersReader, err := runcmd("grep", "-rH", "^#", fmt.Sprintf("/opt/openvpn-%s/ccd/", *wgi))
 	if err != nil {
 		logger.Fatal("openvpn peers file:", err)
 	}
