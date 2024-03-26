@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -29,7 +28,7 @@ func getOpenVPNPeerMap(reader io.Reader) (map[string]string, error) {
 	return m, nil
 }
 
-func extractOpenVPNStatus2(reader io.Reader) ([]byte, error) {
+func extractOpenVPNStatus(reader io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		header := "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since\n"
@@ -43,7 +42,7 @@ func extractOpenVPNStatus2(reader io.Reader) ([]byte, error) {
 		if idx == -1 {
 			return 0, nil, fmt.Errorf("%q not found", footer)
 		}
-		end := start + idx - 1
+		end := start + idx
 		return len(data), data[start:end], nil
 	})
 	if !scanner.Scan() {
@@ -82,7 +81,7 @@ func parseOpenVPNStatus(data []byte, peerMap map[string]string) (map[string]open
 }
 
 func getOpenVPNStatus(statusR, peersR io.Reader) (map[string]openVPNStatus, error) {
-	status, err := extractOpenVPNStatus2(statusR)
+	status, err := extractOpenVPNStatus(statusR)
 	if err != nil {
 		return nil, fmt.Errorf("extract openvpn status: %w", err)
 	}
@@ -130,7 +129,6 @@ func getOpenVPNEndpoints(authDb io.Reader, status map[string]openVPNStatus) (pee
 		}
 		m[fields[0]] = fields[1]
 	}
-	log.Println(m)
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan authdb: %w", err)
 	}
