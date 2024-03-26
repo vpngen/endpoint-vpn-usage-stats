@@ -6,7 +6,7 @@ go build .
 ```
 Usage of ./endpoint-vpn-usage-stats:
   -debug
-        debug logging, indented json output
+        print errors to stderr, indented json output
   -wgi string
         wg interface, e.g. wg0, required
 ```

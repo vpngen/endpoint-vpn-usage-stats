@@ -8,9 +8,20 @@ import (
 	"os"
 )
 
+var (
+	logger *log.Logger
+	debug  bool
+)
+
+func debugLog(v ...any) {
+	if debug {
+		logger.Println(v...)
+	}
+}
+
 func main() {
 	wgi := flag.String("wgi", "", "wg interface, e.g. wg0, required")
-	debug := flag.Bool("debug", false, "debug logging, indented json output")
+	flag.BoolVar(&debug, "debug", false, "print errors to stderr, indented json output")
 	flag.Parse()
 
 	if *wgi == "" {
@@ -19,11 +30,10 @@ func main() {
 	}
 
 	var logFlags int
-	if *debug {
+	if debug {
 		logFlags = log.Lshortfile
 	}
-
-	logger := log.New(os.Stderr, "", logFlags)
+	logger = log.New(os.Stderr, "", logFlags)
 
 	res := stat{
 		Code: 0,
@@ -43,43 +53,43 @@ func main() {
 	// wireguard
 	wgTraffic, err := getWgTransfer(*wgi)
 	if err != nil {
-		logger.Println("wg show transfer:", err)
+		debugLog("wg show transfer:", err)
 	} else {
 		mergePeers(res.Data.Traffic, wgTraffic)
 	}
 
 	wgLastSeen, err := getWgLatestHandshakes(*wgi)
 	if err != nil {
-		logger.Println("wg show latest-handshakes:", err)
+		debugLog("wg show latest-handshakes:", err)
 	} else {
 		mergePeers(res.Data.LastSeen, wgLastSeen)
 	}
 
 	wgEndpoints, err := getWgEndpoints(*wgi)
 	if err != nil {
-		logger.Println("wg show endpoints:", err)
+		debugLog("wg show endpoints:", err)
 	} else {
 		mergePeers(res.Data.Endpoints, wgEndpoints)
 	}
 
 	// ipsec
 	if err = getIPSec(*wgi, res); err != nil {
-		logger.Println("ipsec:", err)
+		debugLog("ipsec:", err)
 	}
 
 	// cloak-openvpn
 	if err = getOVC(*wgi, res); err != nil {
-		logger.Println("cloak-openvpn:", err)
+		debugLog("cloak-openvpn:", err)
 	}
 
 	// outline-ss
 	if err = getOutline(*wgi, res); err != nil {
-		logger.Println("outline-ss:", err)
+		debugLog("outline-ss:", err)
 	}
 
 	// output
 	encoder := json.NewEncoder(os.Stdout)
-	if *debug {
+	if debug {
 		encoder.SetIndent("", "  ")
 	}
 	if err = encoder.Encode(res); err != nil {
