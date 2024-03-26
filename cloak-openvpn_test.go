@@ -12,10 +12,14 @@ func TestOpenvpnTraffic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer statusFile.Close()
+
 	peerFile, err := os.Open("openvpn-ccd")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer peerFile.Close()
+
 	status, err := getOpenVPNStatus(statusFile, peerFile)
 	if err != nil {
 		t.Fatal(err)
@@ -34,10 +38,14 @@ func TestOpenvpnLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer statusFile.Close()
+
 	peerFile, err := os.Open("openvpn-ccd")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer peerFile.Close()
+
 	status, err := getOpenVPNStatus(statusFile, peerFile)
 	if err != nil {
 		t.Fatal(err)

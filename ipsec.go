@@ -28,7 +28,7 @@ func parseIpsecSecrets(reader io.Reader) (map[string]string, error) {
 
 func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string)) (peer[T], error) {
 	scanner := bufio.NewScanner(reader)
-	//skip header
+	// skip header
 	scanner.Scan()
 	scanner.Scan()
 	peers := make(peer[T])

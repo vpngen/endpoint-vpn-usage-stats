@@ -131,6 +131,8 @@ func getOVC(wgi string, res stat) error {
 	if err != nil {
 		return fmt.Errorf("openvpn status file: %w", err)
 	}
+	defer statusFile.Close()
+
 	peersReader, err := runcmd("grep", "-rH", "^#", fmt.Sprintf("/opt/openvpn-%s/ccd/", wgi))
 	if err != nil {
 		return fmt.Errorf("openvpn peers file: %w", err)
@@ -147,6 +149,7 @@ func getOVC(wgi string, res stat) error {
 	if err != nil {
 		return fmt.Errorf("openvpn authdb file: %w", err)
 	}
+	defer authDbFile.Close()
 
 	ovpnEndpoints, err := getOpenVPNEndpoints(authDbFile, status)
 	if err != nil {
