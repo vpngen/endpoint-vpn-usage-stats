@@ -8,9 +8,20 @@ import (
 	"os"
 )
 
+var (
+	logger *log.Logger
+	debug  bool
+)
+
+func debugLog(v ...any) {
+	if debug {
+		logger.Println(v...)
+	}
+}
+
 func main() {
 	wgi := flag.String("wgi", "", "wg interface, e.g. wg0, required")
-	debug := flag.Bool("debug", false, "debug logging, indented json output")
+	flag.BoolVar(&debug, "debug", false, "print errors to stderr, indented json output")
 	flag.Parse()
 
 	if *wgi == "" {
@@ -19,11 +30,10 @@ func main() {
 	}
 
 	var logFlags int
-	if *debug {
+	if debug {
 		logFlags = log.Lshortfile
 	}
-
-	logger := log.New(os.Stderr, "", logFlags)
+	logger = log.New(os.Stderr, "", logFlags)
 
 	res := stat{
 		Code: 0,
@@ -43,93 +53,124 @@ func main() {
 	// wireguard
 	wgTraffic, err := getWgTransfer(*wgi)
 	if err != nil {
-		logger.Fatal("wg show transfer:", err)
+		debugLog("wg show transfer:", err)
+	} else {
+		mergePeers(res.Data.Traffic, wgTraffic)
 	}
-	mergePeers(res.Data.Traffic, wgTraffic)
 
 	wgLastSeen, err := getWgLatestHandshakes(*wgi)
 	if err != nil {
-		logger.Fatal("wg show latest-handshakes:", err)
+		debugLog("wg show latest-handshakes:", err)
+	} else {
+		mergePeers(res.Data.LastSeen, wgLastSeen)
 	}
-	mergePeers(res.Data.LastSeen, wgLastSeen)
 
 	wgEndpoints, err := getWgEndpoints(*wgi)
 	if err != nil {
-		logger.Fatal("wg show endpoints:", err)
+		debugLog("wg show endpoints:", err)
+	} else {
+		mergePeers(res.Data.Endpoints, wgEndpoints)
 	}
-	mergePeers(res.Data.Endpoints, wgEndpoints)
 
 	// ipsec
-	file, err := os.Open("/etc/accel-ppp.chap-secrets." + *wgi)
-	if err != nil {
-		logger.Fatal("ipsec secrets file:", err)
+	if err = getIPSec(*wgi, res); err != nil {
+		debugLog("ipsec:", err)
 	}
-	username2peer, err := parseIpsecSecrets(file)
-	if err != nil {
-		logger.Fatal("parse ipsec secrets:", err)
-	}
-	if err = file.Close(); err != nil {
-		logger.Fatal("close ipsec secrets file:", err)
-	}
-
-	ipsecTraffic, err := getIpsecTraffic(*wgi, username2peer)
-	if err != nil {
-		logger.Fatal("ipsec traffic:", err)
-	}
-	mergePeers(res.Data.Traffic, ipsecTraffic)
-
-	mergePeers(res.Data.LastSeen, parseIpsecLastSeen(username2peer))
-
-	ipsecEndpoints, err := getIpsecEndpoints(*wgi, username2peer)
-	if err != nil {
-		logger.Fatal("ipsec endpoints:", err)
-	}
-	mergePeers(res.Data.Endpoints, ipsecEndpoints)
 
 	// cloak-openvpn
-	statusFile, err := os.Open(fmt.Sprintf("/opt/openvpn-%s/status.log", *wgi))
-	if err != nil {
-		logger.Fatal("openvpn status file:", err)
+	if err = getOVC(*wgi, res); err != nil {
+		debugLog("cloak-openvpn:", err)
 	}
-	peersReader, err := runcmd("grep", "-rH", "^#", fmt.Sprintf("/opt/openvpn-%s/ccd/", *wgi))
-	if err != nil {
-		logger.Fatal("openvpn peers file:", err)
-	}
-	status, err := getOpenVPNStatus(statusFile, peersReader)
-	if err != nil {
-		logger.Fatal("parse openvpn status:", err)
-	}
-	mergePeers(res.Data.Traffic, getOpenVPNTraffic(status))
-
-	mergePeers(res.Data.LastSeen, getOpenVPNLastSeen(status))
-
-	authDbFile, err := os.Open(fmt.Sprintf("/opt/cloak-%s/userinfo/userauthdb.log", *wgi))
-	if err != nil {
-		logger.Fatal("openvpn authdb file:", err)
-	}
-	ovpnEndpoints, err := getOpenVPNEndpoints(authDbFile, status)
-	mergePeers(res.Data.Endpoints, ovpnEndpoints)
 
 	// outline-ss
-	outlineTraffic, err := getOutlineTraffic(*wgi)
-	if err != nil {
-		logger.Fatal("outline traffic:", err)
+	if err = getOutline(*wgi, res); err != nil {
+		debugLog("outline-ss:", err)
 	}
-	mergePeers(res.Data.Traffic, outlineTraffic)
-
-	outlineLastSeen, outlineEndpoints, err := getOutlineLastSeenAndEndpoints(*wgi)
-	if err != nil {
-		logger.Fatal("outline last seen and endpoints:", err)
-	}
-	mergePeers(res.Data.LastSeen, outlineLastSeen)
-	mergePeers(res.Data.Endpoints, outlineEndpoints)
 
 	// output
 	encoder := json.NewEncoder(os.Stdout)
-	if *debug {
+	if debug {
 		encoder.SetIndent("", "  ")
 	}
 	if err = encoder.Encode(res); err != nil {
 		logger.Fatal("json encode:", err)
 	}
+}
+
+func getIPSec(wgi string, res stat) error {
+	file, err := os.Open("/etc/accel-ppp.chap-secrets." + wgi)
+	if err != nil {
+		return fmt.Errorf("ipsec secrets file: %w", err)
+	}
+	defer file.Close()
+
+	username2peer, err := parseIpsecSecrets(file)
+	if err != nil {
+		return fmt.Errorf("parse ipsec secrets: %w", err)
+	}
+
+	ipsecTraffic, err := getIpsecTraffic(wgi, username2peer)
+	if err != nil {
+		return fmt.Errorf("ipsec traffic: %w", err)
+	}
+	mergePeers(res.Data.Traffic, ipsecTraffic)
+
+	mergePeers(res.Data.LastSeen, parseIpsecLastSeen(username2peer))
+
+	ipsecEndpoints, err := getIpsecEndpoints(wgi, username2peer)
+	if err != nil {
+		return fmt.Errorf("ipsec endpoints: %w", err)
+	}
+	mergePeers(res.Data.Endpoints, ipsecEndpoints)
+
+	return nil
+}
+
+func getOVC(wgi string, res stat) error {
+	statusFile, err := os.Open(fmt.Sprintf("/opt/openvpn-%s/status.log", wgi))
+	if err != nil {
+		return fmt.Errorf("openvpn status file: %w", err)
+	}
+	peersReader, err := runcmd("grep", "-rH", "^#", fmt.Sprintf("/opt/openvpn-%s/ccd/", wgi))
+	if err != nil {
+		return fmt.Errorf("openvpn peers file: %w", err)
+	}
+	status, err := getOpenVPNStatus(statusFile, peersReader)
+	if err != nil {
+		return fmt.Errorf("parse openvpn status: %w", err)
+	}
+	mergePeers(res.Data.Traffic, getOpenVPNTraffic(status))
+
+	mergePeers(res.Data.LastSeen, getOpenVPNLastSeen(status))
+
+	authDbFile, err := os.Open(fmt.Sprintf("/opt/cloak-%s/userinfo/userauthdb.log", wgi))
+	if err != nil {
+		return fmt.Errorf("openvpn authdb file: %w", err)
+	}
+
+	ovpnEndpoints, err := getOpenVPNEndpoints(authDbFile, status)
+	if err != nil {
+		return fmt.Errorf("openvpn endpoints: %w", err)
+	}
+	mergePeers(res.Data.Endpoints, ovpnEndpoints)
+
+	return nil
+}
+
+func getOutline(wgi string, res stat) error {
+	outlineTraffic, err := getOutlineTraffic(wgi)
+	if err != nil {
+		return fmt.Errorf("traffic: %w", err)
+	}
+	mergePeers(res.Data.Traffic, outlineTraffic)
+
+	outlineLastSeen, outlineEndpoints, err := getOutlineLastSeenAndEndpoints(wgi)
+	if err != nil {
+		return fmt.Errorf("last seen and endpoints: %w", err)
+	}
+
+	mergePeers(res.Data.LastSeen, outlineLastSeen)
+	mergePeers(res.Data.Endpoints, outlineEndpoints)
+
+	return nil
 }
