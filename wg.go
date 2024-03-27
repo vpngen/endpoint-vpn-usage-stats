@@ -16,13 +16,14 @@ func wgShowTransfer(wgi string) (io.Reader, error) {
 }
 
 func parseWgTransfer(reader io.Reader) (peer[traffic], error) {
-	return parseWg(reader, 3, func(peers peer[traffic], fields []string) {
+	return parseWg(reader, 3, func(peers peer[traffic], fields []string) error {
 		peers[fields[0]] = map[string]traffic{
 			"wireguard": {
 				Received: fields[1],
 				Sent:     fields[2],
 			},
 		}
+		return nil
 	})
 }
 
@@ -43,12 +44,13 @@ func wgShowLatestHandshakes(wgi string) (io.Reader, error) {
 }
 
 func parseWgLatestHandshakes(reader io.Reader) (peer[lastSeen], error) {
-	return parseWg(reader, 2, func(peers peer[lastSeen], fields []string) {
+	return parseWg(reader, 2, func(peers peer[lastSeen], fields []string) error {
 		peers[fields[0]] = map[string]lastSeen{
 			"wireguard": {
 				Timestamp: fields[1],
 			},
 		}
+		return nil
 	})
 }
 
@@ -69,12 +71,17 @@ func wgShowEndpoints(wgi string) (io.Reader, error) {
 }
 
 func parseWgEndpoints(reader io.Reader) (peer[endpoints], error) {
-	return parseWg(reader, 2, func(peers peer[endpoints], fields []string) {
+	return parseWg(reader, 2, func(peers peer[endpoints], fields []string) error {
+		subnet, err := get24SubnetFromIP(fields[1])
+		if err != nil {
+			return fmt.Errorf("get subnet from ip: %w", err)
+		}
 		peers[fields[0]] = map[string]endpoints{
 			"wireguard": {
-				Subnet: fields[1],
+				Subnet: subnet,
 			},
 		}
+		return nil
 	})
 }
 
@@ -90,7 +97,7 @@ func getWgEndpoints(wgi string) (peer[endpoints], error) {
 	return peers, nil
 }
 
-func parseWg[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string)) (peer[T], error) {
+func parseWg[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string) error) (peer[T], error) {
 	scanner := bufio.NewScanner(reader)
 	peers := make(peer[T])
 	for scanner.Scan() {
@@ -99,7 +106,9 @@ func parseWg[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []s
 		if len(fields) != nFields {
 			return nil, fmt.Errorf("invalid line: %s", line)
 		}
-		fieldSetter(peers, fields)
+		if err := fieldSetter(peers, fields); err != nil {
+			return nil, fmt.Errorf("field setter: %w", err)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scanner error: %w", err)

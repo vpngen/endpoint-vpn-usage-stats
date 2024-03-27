@@ -26,7 +26,7 @@ func parseIpsecSecrets(reader io.Reader) (map[string]string, error) {
 	return username2peer, nil
 }
 
-func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string)) (peer[T], error) {
+func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string) error) (peer[T], error) {
 	scanner := bufio.NewScanner(reader)
 	// skip header
 	scanner.Scan()
@@ -38,7 +38,9 @@ func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], 
 		if len(fields) != nFields {
 			return nil, fmt.Errorf("invalid line: %q", line)
 		}
-		fieldSetter(peers, fields)
+		if err := fieldSetter(peers, fields); err != nil {
+			return nil, fmt.Errorf("field setter: %w", err)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scanner error: %w", err)
@@ -47,23 +49,29 @@ func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], 
 }
 
 func parseIpsecTraffic(reader io.Reader, username2peer map[string]string) (peer[traffic], error) {
-	return parseIpsec(reader, 5, func(peers peer[traffic], fields []string) {
+	return parseIpsec(reader, 5, func(peers peer[traffic], fields []string) error {
 		peers[username2peer[fields[0]]] = map[string]traffic{
 			"ipsec": {
 				Received: fields[2],
 				Sent:     fields[4],
 			},
 		}
+		return nil
 	})
 }
 
 func parseIpsecEndpoints(reader io.Reader, username2peer map[string]string) (peer[endpoints], error) {
-	return parseIpsec(reader, 3, func(peers peer[endpoints], fields []string) {
+	return parseIpsec(reader, 3, func(peers peer[endpoints], fields []string) error {
+		subnet, err := get24SubnetFromIP(fields[2])
+		if err != nil {
+			return fmt.Errorf("get subnet from ip: %w", err)
+		}
 		peers[username2peer[fields[0]]] = map[string]endpoints{
 			"ipsec": {
-				Subnet: fields[2],
+				Subnet: subnet,
 			},
 		}
+		return nil
 	})
 }
 

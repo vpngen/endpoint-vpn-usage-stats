@@ -134,7 +134,11 @@ func getOpenVPNEndpoints(authDb io.Reader, status map[string]openVPNStatus) (pee
 	}
 	peers := make(peer[endpoints])
 	for k, s := range status {
-		peers[s.commonName] = map[string]endpoints{"openvpn": {Subnet: m[k]}}
+		subnet, err := get24SubnetFromIP(m[k])
+		if err != nil {
+			return nil, fmt.Errorf("get subnet from ip: %w", err)
+		}
+		peers[s.commonName] = map[string]endpoints{"openvpn": {Subnet: subnet}}
 	}
 	return peers, nil
 }
