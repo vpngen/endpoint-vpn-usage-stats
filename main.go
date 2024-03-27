@@ -40,7 +40,7 @@ func main() {
 		Data: data{
 			Aggregated: aggregated{
 				"wireguard":     1,
-				"ipcsec":        0,
+				"ipsec":         0,
 				"cloak-openvpn": 0,
 				"outline-ss":    1,
 			},
