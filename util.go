@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"net"
 	"os/exec"
 )
 
@@ -29,4 +31,14 @@ func mergePeers[T any](peersA, peersB peer[T]) peer[T] {
 		}
 	}
 	return peersA
+}
+
+func get24SubnetFromIP(s string) (string, error) {
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return "", fmt.Errorf("invalid ip %q", s)
+	}
+	mask := net.CIDRMask(24, 32)
+	netip := net.IPNet{IP: ip.Mask(mask), Mask: mask}
+	return netip.String(), nil
 }

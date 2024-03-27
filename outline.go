@@ -117,7 +117,11 @@ func parseOutlineLastSeenAndEndpoints(reader io.Reader) (peer[lastSeen], peer[en
 			return nil, nil, fmt.Errorf("invalid line: %q", line)
 		}
 		ls[fields[0]] = map[string]lastSeen{"outline-ss": {Timestamp: fields[3]}}
-		ep[fields[0]] = map[string]endpoints{"outline-ss": {Subnet: fields[2]}}
+		subnet, err := get24SubnetFromIP(fields[2])
+		if err != nil {
+			return nil, nil, fmt.Errorf("get subnet from ip: %w", err)
+		}
+		ep[fields[0]] = map[string]endpoints{"outline-ss": {Subnet: subnet}}
 	}
 	if scanner.Err() != nil {
 		return nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
