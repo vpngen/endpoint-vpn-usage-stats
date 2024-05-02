@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -116,12 +117,20 @@ func parseOutlineLastSeenAndEndpoints(reader io.Reader) (peer[lastSeen], peer[en
 		if len(fields) != 4 {
 			return nil, nil, fmt.Errorf("invalid line: %q", line)
 		}
-		ls[fields[0]] = map[string]lastSeen{"outline-ss": {Timestamp: fields[3]}}
+
+		peerBytes, err := base64.URLEncoding.DecodeString(fields[0])
+		if err != nil {
+			return nil, nil, fmt.Errorf("b64url decode %q: %w", fields[0], err)
+		}
+
+		pub := base64.StdEncoding.EncodeToString(peerBytes)
+
+		ls[pub] = map[string]lastSeen{"outline-ss": {Timestamp: fields[3]}}
 		subnet, err := get24SubnetFromIP(fields[2])
 		if err != nil {
 			return nil, nil, fmt.Errorf("get subnet from ip: %w", err)
 		}
-		ep[fields[0]] = map[string]endpoints{"outline-ss": {Subnet: subnet}}
+		ep[pub] = map[string]endpoints{"outline-ss": {Subnet: subnet}}
 	}
 	if scanner.Err() != nil {
 		return nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
