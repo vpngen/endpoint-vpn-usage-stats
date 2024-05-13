@@ -89,7 +89,7 @@ func main() {
 		debugLog("outline-ss:", err)
 	}
 
-	res.Timestamp = strconv.Itoa(int(time.Now().Unix()))
+	res.Timestamp = strconv.FormatInt(time.Now().Unix(), 10)
 
 	// output
 	encoder := json.NewEncoder(os.Stdout)
