@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"time"
 )
 
 var (
@@ -36,7 +38,7 @@ func main() {
 	logger = log.New(os.Stderr, "", logFlags)
 
 	res := stat{
-		Code: 0,
+		Code: "0",
 		Data: data{
 			Aggregated: aggregated{
 				"wireguard":     1,
@@ -87,6 +89,8 @@ func main() {
 		debugLog("outline-ss:", err)
 	}
 
+	res.Timestamp = strconv.Itoa(int(time.Now().Unix()))
+
 	// output
 	encoder := json.NewEncoder(os.Stdout)
 	if debug {
@@ -135,7 +139,7 @@ func getOVC(wgi string, res stat) error {
 
 	peersReader, err := runcmd("grep", "-rH", "^#", fmt.Sprintf("/opt/openvpn-%s/ccd/", wgi))
 	if err != nil {
-		return fmt.Errorf("openvpn peers file: %w", err)
+		return fmt.Errorf("openvpn grep peers: %w", err)
 	}
 	status, err := getOpenVPNStatus(statusFile, peersReader)
 	if err != nil {

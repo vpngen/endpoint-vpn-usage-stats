@@ -72,6 +72,9 @@ func wgShowEndpoints(wgi string) (io.Reader, error) {
 
 func parseWgEndpoints(reader io.Reader) (peer[endpoints], error) {
 	return parseWg(reader, 2, func(peers peer[endpoints], fields []string) error {
+		if fields[1] == "(none)" {
+			return nil
+		}
 		subnet, err := get24SubnetFromIP(fields[1])
 		if err != nil {
 			return fmt.Errorf("get subnet from ip: %w", err)

@@ -28,7 +28,8 @@ type (
 	}
 
 	stat struct {
-		Code int  `json:"code"`
-		Data data `json:"data"`
+		Code      string `json:"code"`
+		Data      data   `json:"data"`
+		Timestamp string `json:"timestamp"`
 	}
 )
