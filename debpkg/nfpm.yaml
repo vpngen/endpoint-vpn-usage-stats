@@ -16,7 +16,7 @@ homepage: "http://vpngen.org"
 license: "LGPL"
 
 contents:
-- src: bin/snapshot
+- src: bin/stats
   dst: /stats
   file_info:
     mode: 0755
