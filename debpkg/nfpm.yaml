@@ -1,0 +1,28 @@
+name: "endpoint-vpn-usage-stats"
+arch: "amd64"
+platform: "linux"
+version: ${PACKAGE_VERSION}
+section: "default"
+priority: "optional"
+release: ${PACKAGE_RELEASE}
+
+provides:
+- endpoint-vpn-usage-stats
+
+maintainer: "Ingmund Ollson <ingmund@proton.me>"
+description: VPNGen endpoint vpn usage stats
+vendor: "VPNGen"
+homepage: "http://vpngen.org"
+license: "LGPL"
+
+contents:
+- src: bin/stats
+  dst: /stats
+  file_info:
+    mode: 0755
+    owner: root
+    group: root
+
+deb:
+  compression: xz
+
