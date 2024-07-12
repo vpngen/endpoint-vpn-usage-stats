@@ -157,7 +157,9 @@ func getOVC(wgi string, res stat) error {
 
 	ovpnEndpoints, err := getOpenVPNEndpoints(authDbFile, status)
 	if err != nil {
-		return fmt.Errorf("openvpn endpoints: %w", err)
+		fmt.Fprintf(os.Stderr, "openvpn endpoints: %s", err)
+
+		// return fmt.Errorf("openvpn endpoints: %w", err)
 	}
 	mergePeers(res.Data.Endpoints, ovpnEndpoints)
 
