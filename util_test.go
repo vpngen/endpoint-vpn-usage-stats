@@ -14,7 +14,7 @@ func TestIP2Subnet(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		out, err := get24SubnetFromIP(tc.in)
+		out, err := ipToSubnet(tc.in)
 		if err != nil {
 			t.Fatal(err)
 		}

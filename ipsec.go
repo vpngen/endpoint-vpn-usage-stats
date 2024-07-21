@@ -51,7 +51,7 @@ func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], 
 func parseIpsecTraffic(reader io.Reader, username2peer map[string]string) (peer[traffic], error) {
 	return parseIpsec(reader, 5, func(peers peer[traffic], fields []string) error {
 		peers[username2peer[fields[0]]] = map[string]traffic{
-			"ipsec": {
+			protoIPsec: {
 				Received: fields[2],
 				Sent:     fields[4],
 			},
@@ -62,12 +62,12 @@ func parseIpsecTraffic(reader io.Reader, username2peer map[string]string) (peer[
 
 func parseIpsecEndpoints(reader io.Reader, username2peer map[string]string) (peer[endpoints], error) {
 	return parseIpsec(reader, 3, func(peers peer[endpoints], fields []string) error {
-		subnet, err := get24SubnetFromIP(fields[2])
+		subnet, err := ipToSubnet(fields[2])
 		if err != nil {
 			return fmt.Errorf("get subnet from ip: %w", err)
 		}
 		peers[username2peer[fields[0]]] = map[string]endpoints{
-			"ipsec": {
+			protoIPsec: {
 				Subnet: subnet,
 			},
 		}
@@ -79,7 +79,7 @@ func parseIpsecLastSeen(username2peer map[string]string) peer[lastSeen] {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	peers := make(peer[lastSeen])
 	for _, p := range username2peer {
-		peers[p] = map[string]lastSeen{"ipsec": {Timestamp: ts}}
+		peers[p] = map[string]lastSeen{protoIPsec: {Timestamp: ts}}
 	}
 	return peers
 }
@@ -97,7 +97,7 @@ func getIpsecTraffic(wgi string, username2peer map[string]string) (peer[traffic]
 }
 
 func getIpsecEndpoints(wgi string, username2peer map[string]string) (peer[endpoints], error) {
-	stdout, err := runcmd("ip", "netns", "exec", "ns"+wgi, "accel-cmd", "-4", "-t", "3", "show", "sessions", "username,subnet")
+	stdout, err := runcmd("ip", "netns", "exec", "ns"+wgi, "accel-cmd", "-4", "-t", "3", "show", "sessions", "username,calling-sid")
 	if err != nil {
 		return nil, fmt.Errorf("accel-cmd: %w", err)
 	}
