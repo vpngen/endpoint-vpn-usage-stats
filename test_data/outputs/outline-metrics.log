@@ -1,0 +1,36 @@
+# HELP shadowsocks_data_bytes Bytes transferred by the proxy, per access key
+# TYPE shadowsocks_data_bytes counter
+shadowsocks_data_bytes{access_key="",dir="c>p",proto="tcp"} 24282
+shadowsocks_data_bytes{access_key="",dir="c>p",proto="udp"} 87740
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="c<p",proto="tcp"} 1.21017699e+08
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="c<p",proto="udp"} 3.6955473e+07
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="c>p",proto="tcp"} 1.309097e+06
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="c>p",proto="udp"} 3.333216e+06
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="p<t",proto="tcp"} 1.2058432e+08
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="p<t",proto="udp"} 4.3753692e+07
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="p>t",proto="tcp"} 1.136114e+06
+shadowsocks_data_bytes{access_key="nmOqrxuL-jZPtcmDN5T2uOioAfgCVTgCxiD32k2YWag=",dir="p>t",proto="udp"} 2.238098e+06
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="c<p",proto="tcp"} 2.21017699e+08
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="c<p",proto="udp"} 1.6955473e+07
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="c>p",proto="tcp"} 3.309097e+06
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="c>p",proto="udp"} 2.333216e+06
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="p<t",proto="tcp"} 1.2058432e+08
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="p<t",proto="udp"} 3.3753692e+07
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="p>t",proto="tcp"} 2.136114e+06
+shadowsocks_data_bytes{access_key="e45JqFuA4yC78J9owAozUW9FVzxOWVxTNjU4fNp2auU=",dir="p>t",proto="udp"} 1.238098e+06
+# HELP shadowsocks_data_bytes_per_location Bytes transferred by the proxy, per location
+# TYPE shadowsocks_data_bytes_per_location counter
+shadowsocks_data_bytes_per_location{asn="",dir="c<p",location="ZZ",proto="tcp"} 3.33502308408e+11
+shadowsocks_data_bytes_per_location{asn="",dir="c<p",location="ZZ",proto="udp"} 3.72241394295e+11
+shadowsocks_data_bytes_per_location{asn="",dir="c>p",location="ZZ",proto="tcp"} 3.3032312647e+10
+shadowsocks_data_bytes_per_location{asn="",dir="c>p",location="ZZ",proto="udp"} 1.6786519974e+10
+shadowsocks_data_bytes_per_location{asn="",dir="p<t",location="ZZ",proto="tcp"} 3.32123605459e+11
+shadowsocks_data_bytes_per_location{asn="",dir="p<t",location="ZZ",proto="udp"} 3.79844025992e+11
+shadowsocks_data_bytes_per_location{asn="",dir="p>t",location="ZZ",proto="tcp"} 3.1539960988e+10
+shadowsocks_data_bytes_per_location{asn="",dir="p>t",location="ZZ",proto="udp"} 1.3373801738e+10
+# HELP shadowsocks_keys Count of access keys
+# TYPE shadowsocks_keys gauge
+shadowsocks_keys 197
+# HELP shadowsocks_ports Count of open Shadowsocks ports
+# TYPE shadowsocks_ports gauge
+shadowsocks_ports 1

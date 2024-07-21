@@ -5,49 +5,108 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func getOpenVPNPeerMap(reader io.Reader) (map[string]string, error) {
-	scanner := bufio.NewScanner(reader)
-	m := make(map[string]string)
-	for scanner.Scan() {
-		line := scanner.Text()
-		tmp := strings.Split(line, ":#")
-		if len(tmp) != 2 {
-			return nil, fmt.Errorf("invalid line: %q", line)
+// getOVCPeerMaps - mapping
+// [common name] -> wg public key.
+// [cloak uid] -> wg public key.
+func getOVCPeerMaps(myFS fs.FS, path string, list []fs.DirEntry) (map[string]string, map[string]string, error) {
+	cnMap := make(map[string]string)
+	uidMap := make(map[string]string)
+
+	for _, entry := range list {
+		key, uid, err := readOVCMappingFile(myFS, path, entry)
+		if err != nil {
+			// fmt.Fprintf(os.Stderr, "read openvpn ccd file: %s\n", err)
+
+			continue
 		}
-		right := strings.Split(tmp[1], " ")
-		if len(right) != 2 {
-			return nil, fmt.Errorf("invalid line: %q", line)
+
+		if key == "" || uid == "" {
+			continue
 		}
-		m[right[0]] = right[1]
+
+		cnMap[entry.Name()] = key
+		uidMap[uid] = key
 	}
-	return m, nil
+
+	return cnMap, uidMap, nil
 }
 
+// readOVCMappingFile - read openvpn ccd file and return mapping
+// [wg public key] , uid.
+func readOVCMappingFile(myFS fs.FS, path string, entry fs.DirEntry) (string, string, error) {
+	f, err := myFS.Open(filepath.Join(path, entry.Name()))
+	if err != nil {
+		return "", "", fmt.Errorf("open file: %w", err)
+	}
+
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Split(strings.TrimPrefix(line, "#"), " ")
+		if len(parts) != 2 {
+			// return "", "", fmt.Errorf("invalid line: %q", line)
+
+			continue
+		}
+
+		// wg public key -> uid
+		return parts[0], parts[1], nil
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", "", fmt.Errorf("scan file: %w", err)
+	}
+
+	return "", "", fmt.Errorf("no line found")
+}
+
+// extractOpenVPNStatus - extract openvpn status from reader,
+// ussually from "/opt/openvpn-%s/status.log".
+// Status only onlines, not offline.
 func extractOpenVPNStatus(reader io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(reader)
+
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		header := "Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since\n"
+
 		idx := bytes.Index(data, []byte(header))
 		if idx == -1 {
 			return 0, nil, fmt.Errorf("%q not found", header)
 		}
+
 		start := idx + len(header)
 		footer := "ROUTING TABLE"
+
 		idx = bytes.Index(data[start:], []byte(footer))
 		if idx == -1 {
 			return 0, nil, fmt.Errorf("%q not found", footer)
 		}
+
 		end := start + idx
+
 		return len(data), data[start:end], nil
 	})
+
 	if !scanner.Scan() {
 		return nil, scanner.Err()
 	}
+
 	return scanner.Bytes(), nil
 }
 
@@ -59,86 +118,87 @@ type openVPNStatus struct {
 	connectedSince string
 }
 
+// parseOpenVPNStatus - parse openvpn status from data, return map of openvpn status.
 func parseOpenVPNStatus(data []byte, peerMap map[string]string) (map[string]openVPNStatus, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
 	statuses := make(map[string]openVPNStatus)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+
 	for scanner.Scan() {
 		line := scanner.Text()
+
 		fields := strings.Split(line, ",")
 		if len(fields) != 5 {
-			return nil, fmt.Errorf("invalid line: %q", line)
+			fmt.Fprintf(os.Stderr, "invalid line: %q\n", line)
+
+			continue
 		}
-		status := openVPNStatus{
+
+		statuses[peerMap[fields[0]]] = openVPNStatus{
 			commonName:     fields[0],
 			realAddress:    fields[1],
 			bytesReceived:  fields[2],
 			bytesSent:      fields[3],
 			connectedSince: fields[4],
 		}
-		statuses[peerMap[status.commonName]] = status
 	}
+
 	return statuses, nil
 }
 
-func getOpenVPNStatus(statusR, peersR io.Reader) (map[string]openVPNStatus, error) {
+// read "/opt/openvpn-%s/status.log" and extract openvpn status
+// read "grep -rH ^# /opt/openvpn-%s/ccd/" and extract openvpn peers
+func getOpenVPNStatus(statusR io.Reader, cnMap map[string]string) (map[string]openVPNStatus, error) {
 	status, err := extractOpenVPNStatus(statusR)
 	if err != nil {
 		return nil, fmt.Errorf("extract openvpn status: %w", err)
 	}
-	peerMap, err := getOpenVPNPeerMap(peersR)
-	if err != nil {
-		return nil, fmt.Errorf("get openvpn peer map: %w", err)
-	}
-	statusMap, err := parseOpenVPNStatus(status, peerMap)
+
+	statusMap, err := parseOpenVPNStatus(status, cnMap)
 	if err != nil {
 		return nil, fmt.Errorf("parse openvpn status: %w", err)
 	}
+
 	return statusMap, nil
 }
 
-func getOpenVPNTraffic(status map[string]openVPNStatus) peer[traffic] {
+// assembleOpenVPNTraffic - assemble openvpn traffic from openvpn status.
+func assembleOpenVPNTraffic(status map[string]openVPNStatus) peer[traffic] {
 	peers := make(peer[traffic])
-	for _, s := range status {
-		peers[s.commonName] = map[string]traffic{
-			"openvpn": {
+
+	for k, s := range status {
+		peers[k] = map[string]traffic{
+			protoOpenVPNOverCloak: {
 				Received: s.bytesReceived,
 				Sent:     s.bytesSent,
 			},
 		}
 	}
+
 	return peers
 }
 
-func getOpenVPNLastSeen(status map[string]openVPNStatus) peer[lastSeen] {
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
+// assembleOpenVPNLastSeen - assemble openvpn last seen from openvpn status.
+func assembleOpenVPNLastSeen(status map[string]openVPNStatus) peer[lastSeen] {
 	peers := make(peer[lastSeen])
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+
 	for _, s := range status {
-		peers[s.commonName] = map[string]lastSeen{"openvpn": {Timestamp: ts}}
+		peers[s.commonName] = map[string]lastSeen{protoOpenVPNOverCloak: {Timestamp: ts}}
 	}
+
 	return peers
 }
 
-func getOpenVPNEndpoints(authDb io.Reader, status map[string]openVPNStatus) (peer[endpoints], error) {
-	scanner := bufio.NewScanner(authDb)
-	m := make(map[string]string)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			return nil, fmt.Errorf("invalid line: %q", line)
-		}
-		m[fields[0]] = fields[1]
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan authdb: %w", err)
-	}
+func assembleOVCEndpoints(cloakEndpoints map[string]string, uidMap map[string]string, status map[string]openVPNStatus) (peer[endpoints], error) {
 	peers := make(peer[endpoints])
-	for k, s := range status {
-		subnet, err := get24SubnetFromIP(m[k])
-		if err != nil {
-			return nil, fmt.Errorf("get subnet from ip: %w", err)
+
+	for uid, key := range uidMap {
+		if subnet, ok := cloakEndpoints[uid]; ok {
+			if _, ok := status[key]; ok {
+				peers[key] = map[string]endpoints{protoOpenVPNOverCloak: {Subnet: subnet}}
+			}
 		}
-		peers[s.commonName] = map[string]endpoints{"openvpn": {Subnet: subnet}}
 	}
+
 	return peers, nil
 }

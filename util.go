@@ -4,19 +4,27 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"net"
+	"net/netip"
 	"os/exec"
 )
 
+const (
+	ipv4CuttedMask = 24
+	ipv6CuttedMask = 56
+)
+
 func runcmd(command string, args ...string) (io.Reader, error) {
-	cmd := exec.Command(command, args...)
 	buf := new(bytes.Buffer)
+
+	cmd := exec.Command(command, args...)
 	cmd.Stdout = buf
 	cmd.Stderr = io.Discard
+
 	err := cmd.Run()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("run command: %w", err)
 	}
+
 	return buf, nil
 }
 
@@ -33,12 +41,27 @@ func mergePeers[T any](peersA, peersB peer[T]) peer[T] {
 	return peersA
 }
 
-func get24SubnetFromIP(s string) (string, error) {
-	ip := net.ParseIP(s)
-	if ip == nil {
-		return "", fmt.Errorf("invalid ip %q", s)
+// ipToSubnet - cut the ip to common subnet.
+func ipToSubnet(s string) (string, error) {
+	ip, err := netip.ParseAddr(s)
+	if err != nil {
+		ap, err := netip.ParseAddrPort(s)
+		if err != nil {
+			return "", fmt.Errorf("parse addr:port: %w: %s", err, s)
+		}
+
+		ip = ap.Addr()
 	}
-	mask := net.CIDRMask(24, 32)
-	netip := net.IPNet{IP: ip.Mask(mask), Mask: mask}
-	return netip.String(), nil
+
+	bitmask := ipv4CuttedMask
+	if ip.Is6() {
+		bitmask = ipv6CuttedMask
+	}
+
+	prefix, err := ip.Prefix(bitmask)
+	if err != nil {
+		return "", fmt.Errorf("prefix: %w: %s: %d", err, ip, bitmask)
+	}
+
+	return prefix.Masked().String(), nil
 }
