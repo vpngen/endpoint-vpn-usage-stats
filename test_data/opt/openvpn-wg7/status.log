@@ -1,0 +1,12 @@
+OpenVPN CLIENT LIST
+Updated,2024-07-20 23:28:55
+Common Name,Real Address,Bytes Received,Bytes Sent,Connected Since
+5bdb0d91-9195-4fcf-a264-c1feb1a3b0fe,127.0.0.1:54392,20530,26632,2024-07-20 23:28:28
+85b2f677-5bd1-4adc-93e0-9c1978b3744c,127.0.0.1:44444,33333,26632,2024-07-21 23:28:28
+ROUTING TABLE
+Virtual Address,Common Name,Real Address,Last Ref
+100.126.0.2,5bdb0d91-9195-4fcf-a264-c1feb1a3b0fe,127.0.0.1:54392,2024-07-20 23:28:28
+100.126.0.2,85b2f677-5bd1-4adc-93e0-9c1978b3744c,127.0.0.1:54392,2024-07-21 23:28:28
+GLOBAL STATS
+Max bcast/mcast queue length,0
+END

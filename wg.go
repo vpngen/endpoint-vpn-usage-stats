@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 )
 
@@ -18,7 +19,7 @@ func wgShowTransfer(wgi string) (io.Reader, error) {
 func parseWgTransfer(reader io.Reader) (peer[traffic], error) {
 	return parseWg(reader, 3, func(peers peer[traffic], fields []string) error {
 		peers[fields[0]] = map[string]traffic{
-			"wireguard": {
+			protoWireguard: {
 				Received: fields[1],
 				Sent:     fields[2],
 			},
@@ -46,7 +47,7 @@ func wgShowLatestHandshakes(wgi string) (io.Reader, error) {
 func parseWgLatestHandshakes(reader io.Reader) (peer[lastSeen], error) {
 	return parseWg(reader, 2, func(peers peer[lastSeen], fields []string) error {
 		peers[fields[0]] = map[string]lastSeen{
-			"wireguard": {
+			protoWireguard: {
 				Timestamp: fields[1],
 			},
 		}
@@ -75,12 +76,12 @@ func parseWgEndpoints(reader io.Reader) (peer[endpoints], error) {
 		if fields[1] == "(none)" {
 			return nil
 		}
-		subnet, err := get24SubnetFromIP(fields[1])
+		subnet, err := ipToSubnet(fields[1])
 		if err != nil {
 			return fmt.Errorf("get subnet from ip: %w", err)
 		}
 		peers[fields[0]] = map[string]endpoints{
-			"wireguard": {
+			protoWireguard: {
 				Subnet: subnet,
 			},
 		}
@@ -117,4 +118,46 @@ func parseWg[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []s
 		return nil, fmt.Errorf("scanner error: %w", err)
 	}
 	return peers, nil
+}
+
+func getOutlineSSPortAndPublicIP(myFS fs.FS, filePath string) (string, string, error) {
+	file, err := myFS.Open(filePath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to open file: %w", err)
+	}
+
+	defer file.Close()
+
+	var (
+		addr string
+		port string
+	)
+
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "OUTLINE_SS_PORT="):
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				port = parts[1]
+			}
+		case strings.HasPrefix(line, "EXT_IP="):
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				addr = parts[1]
+			}
+		}
+
+		if port != "" && addr != "" {
+			return port, addr, nil
+		}
+	}
+
+	if err = scanner.Err(); err != nil {
+		return "", "", fmt.Errorf("scanner error: %w", err)
+	}
+
+	return "", "", fmt.Errorf("OUTLINE_SS_PORT not found in file")
 }

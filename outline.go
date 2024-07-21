@@ -5,148 +5,238 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
-	"regexp"
+	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	io_prometheus_client "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 )
 
-func getOutlinePortFromWgQuick(wgi string) (string, error) {
-	filePath := fmt.Sprintf("/etc/wg-quick-ns.env.%s", wgi)
-	port, err := getOutlineSSPort(filePath)
+func getOutlinePortFromWgQuick(myFS fs.FS, wgi string) (string, string, error) {
+	filePath := fmt.Sprintf("etc/wg-quick-ns.env.%s", wgi)
+
+	port, addr, err := getOutlineSSPortAndPublicIP(myFS, filePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to get OUTLINE_SS_PORT: %w", err)
+		return "", "", fmt.Errorf("failed to get OUTLINE_SS_PORT: %w", err)
 	}
-	return port, nil
+
+	return port, addr, nil
 }
 
-func getOutlineSSPort(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "OUTLINE_SS_PORT=") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				return parts[1], nil
-			}
-			break
-		}
-	}
-	if err = scanner.Err(); err != nil {
-		return "", fmt.Errorf("scanner error: %w", err)
-	}
-	return "", fmt.Errorf("OUTLINE_SS_PORT not found in file")
-}
-
-var outlineTrafficRE = regexp.MustCompile(`shadowsocks_data_bytes\{access_key="(\S+)",dir="(c[<>]p)",proto="(?:tcp|udp)"} (\d\.\d+e\+\d{2})`)
-
+// var outlineTrafficRE = regexp.MustCompile(`shadowsocks_data_bytes\{access_key="(\S+)",dir="(c[<>]p)",proto="(?:tcp|udp)"} (\d\.\d+e\+\d{2})`)
 func parseOutlineTraffic(reader io.Reader) (peer[traffic], error) {
-	scanner := bufio.NewScanner(reader)
 	peerTrafficMap := make(map[string]struct{ sent, received int })
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "shadowsocks_data_bytes") {
-			continue
+	// Decode the metrics
+	decoder := expfmt.NewDecoder(reader, expfmt.OpenMetricsType)
+
+	for {
+		var mf io_prometheus_client.MetricFamily
+		if err := decoder.Decode(&mf); err != nil {
+			if err == io.EOF {
+				break
+			}
+
+			return nil, fmt.Errorf("decode metrics: %w", err)
 		}
-		match := outlineTrafficRE.FindStringSubmatch(line)
-		if len(match) == 0 {
-			continue
+
+		if mf.GetName() == "shadowsocks_data_bytes" {
+			for _, m := range mf.GetMetric() {
+				labels := m.GetLabel()
+				var (
+					accessKey string
+					dir       string
+				)
+
+				for _, l := range labels {
+					switch l.GetName() {
+					case "access_key":
+						accessKey = l.GetValue()
+					case "dir":
+						dir = l.GetValue()
+					}
+				}
+
+				if accessKey == "" || dir == "" {
+					continue
+				}
+
+				count := m.GetCounter().GetValue()
+
+				trfc, ok := peerTrafficMap[accessKey]
+				if !ok {
+					trfc = struct{ sent, received int }{}
+				}
+
+				switch dir {
+				case "c<p":
+					trfc.received += int(count)
+				case "c>p":
+					trfc.sent += int(count)
+				default:
+					continue
+				}
+
+				peerTrafficMap[accessKey] = trfc
+			}
 		}
-		if len(match) != 4 {
-			return nil, fmt.Errorf("invalid line: %q", line)
-		}
-		peerName := match[1]
-		side := match[2]
-		bytesSent, err := strconv.ParseFloat(match[3], 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid line: %q", line)
-		}
-		trfc, ok := peerTrafficMap[peerName]
-		if !ok {
-			trfc = struct{ sent, received int }{}
-		}
-		switch side {
-		case "c<p":
-			trfc.received += int(bytesSent)
-		case "c>p":
-			trfc.sent += int(bytesSent)
-		default:
-			return nil, fmt.Errorf("invalid line: %q", line)
-		}
-		peerTrafficMap[peerName] = trfc
 	}
-	if scanner.Err() != nil {
-		return nil, fmt.Errorf("scanner error: %w", scanner.Err())
-	}
+
 	peers := make(peer[traffic])
 	for k, v := range peerTrafficMap {
-		peers[k] = map[string]traffic{"outline-ss": {Sent: strconv.Itoa(v.sent), Received: strconv.Itoa(v.received)}}
+		peers[k] = map[string]traffic{protoOutline: {Sent: strconv.Itoa(v.sent), Received: strconv.Itoa(v.received)}}
 	}
+
 	return peers, nil
 }
 
-func getOutlineTraffic(wgi string) (peer[traffic], error) {
-	port, err := getOutlinePortFromWgQuick(wgi)
+// getOutlineTraffic - get outline traffic from metrics endpoint,
+// return common and loopback traffic separately.
+func getOutlineTraffic(wgi string, port string) (peer[traffic], error) {
+	cmd := exec.Command("ip", "netns", "exec", "ns"+wgi, "curl", "-s", "--max-time", "3", fmt.Sprintf("http://127.0.0.1:%s/metrics", port))
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("get outline port: %w", err)
+		return nil, fmt.Errorf("pipe: %w", err)
 	}
-	stdout, err := runcmd("ip", "netns", "exec", "ns"+wgi, "curl", "-s", "--max-time", "3", fmt.Sprintf("http://127.0.0.1:%s/metrics", port))
-	if err != nil {
-		return nil, fmt.Errorf("runcmd: %w", err)
+
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start: %w", err)
 	}
+
 	peers, err := parseOutlineTraffic(stdout)
 	if err != nil {
 		return nil, fmt.Errorf("parse outline traffic: %w", err)
 	}
+
+	if err := cmd.Wait(); err != nil {
+		fmt.Fprintf(os.Stderr, "cmd wait: %v\n", err)
+	}
+
 	return peers, nil
 }
 
-func parseOutlineLastSeenAndEndpoints(reader io.Reader) (peer[lastSeen], peer[endpoints], error) {
-	scanner := bufio.NewScanner(reader)
+func parseOutlineLastSeenAndEndpoints(reader io.Reader, skip []string) (peer[lastSeen], peer[lastSeen], peer[endpoints], error) {
 	ls := make(peer[lastSeen])
+	lsp := make(peer[lastSeen])
 	ep := make(peer[endpoints])
+
+	scanner := bufio.NewScanner(reader)
+
 	for scanner.Scan() {
 		line := scanner.Text()
+
 		fields := strings.Fields(line)
 		if len(fields) != 4 {
-			return nil, nil, fmt.Errorf("invalid line: %q", line)
+			return nil, nil, nil, fmt.Errorf("invalid line: %q", line)
 		}
 
 		peerBytes, err := base64.URLEncoding.DecodeString(fields[0])
 		if err != nil {
-			return nil, nil, fmt.Errorf("b64url decode %q: %w", fields[0], err)
+			return nil, nil, nil, fmt.Errorf("b64url decode %q: %w", fields[0], err)
 		}
 
 		pub := base64.StdEncoding.EncodeToString(peerBytes)
 
-		ls[pub] = map[string]lastSeen{"outline-ss": {Timestamp: fields[3]}}
-		subnet, err := get24SubnetFromIP(fields[2])
+		subnet, err := ipToSubnet(fields[2])
 		if err != nil {
-			return nil, nil, fmt.Errorf("get subnet from ip: %w", err)
+			return nil, nil, nil, fmt.Errorf("get subnet from ip: %w", err)
 		}
-		ep[pub] = map[string]endpoints{"outline-ss": {Subnet: subnet}}
+
+		ignore := false
+		for _, s := range skip {
+			if subnet == s {
+				ignore = true
+
+				lsp[pub] = map[string]lastSeen{protoOutlineOverCloak: {Timestamp: fields[3]}}
+
+				break
+			}
+		}
+
+		if ignore {
+			continue
+		}
+
+		ls[pub] = map[string]lastSeen{protoOutline: {Timestamp: fields[3]}}
+		ep[pub] = map[string]endpoints{protoOutline: {Subnet: subnet}}
 	}
 	if scanner.Err() != nil {
-		return nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
+		return nil, nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
 	}
-	return ls, ep, nil
+
+	return ls, lsp, ep, nil
 }
 
-func getOutlineLastSeenAndEndpoints(wgi string) (peer[lastSeen], peer[endpoints], error) {
-	file, err := os.Open(fmt.Sprintf("/opt/outline-ss-%s/authdb.log", wgi))
+func getOutlineLastSeenAndEndpoints(myFS fs.FS, wgi string, addr string) (peer[lastSeen], peer[lastSeen], peer[endpoints], error) {
+	file, err := myFS.Open(fmt.Sprintf("opt/outline-ss-%s/authdb.log", wgi))
 	if err != nil {
-		return nil, nil, fmt.Errorf("open authdb: %w", err)
+		return nil, nil, nil, fmt.Errorf("open authdb: %w", err)
 	}
+
 	defer file.Close()
-	ls, ep, err := parseOutlineLastSeenAndEndpoints(file)
+
+	skip := make([]string, 0, 3)
+	subnet, err := ipToSubnet(addr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse outline last seen and endpoints: %w", err)
+		return nil, nil, nil, fmt.Errorf("get subnet from ip: %w", err)
 	}
-	return ls, ep, nil
+
+	skip = append(skip, subnet)
+
+	subnet, err = ipToSubnet("127.0.0.1")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get subnet from ip: %w", err)
+	}
+
+	skip = append(skip, subnet)
+
+	subnet, err = ipToSubnet("::1")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get subnet from ip: %w", err)
+	}
+
+	skip = append(skip, subnet)
+
+	ls, lsp, ep, err := parseOutlineLastSeenAndEndpoints(file, skip)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("parse outline last seen and endpoints: %w", err)
+	}
+
+	return ls, lsp, ep, nil
+}
+
+func assembleOLCEndpoints(cloakEndpoints map[string]string, uidMap map[string]string, lastSeen peer[lastSeen]) (peer[endpoints], error) {
+	peers := make(peer[endpoints])
+
+	lastSeenMap := lastSeen[protoOutlineOverCloak]
+	if lastSeenMap == nil {
+		return nil, nil
+	}
+
+	nextToNow := time.Now().UTC().Unix() - 2*60
+
+	for uid, key := range uidMap {
+		if subnet, ok := cloakEndpoints[uid]; ok {
+			if _, ok := lastSeen[key]; ok {
+				if t, ok := lastSeenMap[key]; ok {
+					i, err := strconv.Atoi(t.Timestamp)
+					if err != nil {
+						continue
+					}
+
+					if int64(i) > nextToNow {
+						peers[key] = map[string]endpoints{protoOutlineOverCloak: {Subnet: subnet}}
+					}
+				}
+			}
+		}
+	}
+
+	return peers, nil
 }
