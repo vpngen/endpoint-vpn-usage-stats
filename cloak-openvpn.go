@@ -182,8 +182,8 @@ func assembleOpenVPNLastSeen(status map[string]openVPNStatus) peer[lastSeen] {
 	peers := make(peer[lastSeen])
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 
-	for _, s := range status {
-		peers[s.commonName] = map[string]lastSeen{protoOpenVPNOverCloak: {Timestamp: ts}}
+	for k := range status {
+		peers[k] = map[string]lastSeen{protoOpenVPNOverCloak: {Timestamp: ts}}
 	}
 
 	return peers
