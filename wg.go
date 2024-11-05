@@ -3,121 +3,80 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"io/fs"
 	"strings"
+
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func wgShow(wgi, c string) (io.Reader, error) {
-	return runcmd("ip", "netns", "exec", "ns"+wgi, "wg", "show", wgi, c)
+func getWgPeers(wgi string) ([]wgtypes.Peer, error) {
+	wgc, err := wgctrl.New()
+	if err != nil {
+		return nil, fmt.Errorf("wgctrl new: %w", err)
+	}
+
+	device, err := wgc.Device(wgi)
+	if err != nil {
+		return nil, fmt.Errorf("wgctrl device: %w", err)
+	}
+
+	return device.Peers, nil
 }
 
-func wgShowTransfer(wgi string) (io.Reader, error) {
-	return wgShow(wgi, "transfer")
-}
-
-func parseWgTransfer(reader io.Reader) (peer[traffic], error) {
-	return parseWg(reader, 3, func(peers peer[traffic], fields []string) error {
-		peers[fields[0]] = map[string]traffic{
+func getWgTransfer(p []wgtypes.Peer) peer[traffic] {
+	peers := make(peer[traffic])
+	for _, peer := range p {
+		peers[peer.PublicKey.String()] = map[string]traffic{
 			protoWireguard: {
-				Received: fields[1],
-				Sent:     fields[2],
+				Received: fmt.Sprintf("%d", peer.ReceiveBytes),
+				Sent:     fmt.Sprintf("%d", peer.TransmitBytes),
 			},
 		}
-		return nil
-	})
-}
-
-func getWgTransfer(wgi string) (peer[traffic], error) {
-	stdout, err := wgShowTransfer(wgi)
-	if err != nil {
-		return nil, fmt.Errorf("wg show transfer: %w", err)
 	}
-	peers, err := parseWgTransfer(stdout)
-	if err != nil {
-		return nil, fmt.Errorf("parse wg transfer: %w", err)
-	}
-	return peers, nil
+
+	return peers
 }
 
-func wgShowLatestHandshakes(wgi string) (io.Reader, error) {
-	return wgShow(wgi, "latest-handshakes")
-}
+func getWgLatestHandshakes(p []wgtypes.Peer) peer[lastSeen] {
+	peers := make(peer[lastSeen])
+	for _, peer := range p {
+		if peer.LastHandshakeTime.IsZero() {
+			continue
+		}
 
-func parseWgLatestHandshakes(reader io.Reader) (peer[lastSeen], error) {
-	return parseWg(reader, 2, func(peers peer[lastSeen], fields []string) error {
-		peers[fields[0]] = map[string]lastSeen{
+		peers[peer.PublicKey.String()] = map[string]lastSeen{
 			protoWireguard: {
-				Timestamp: fields[1],
+				Timestamp: fmt.Sprintf("%d", peer.LastHandshakeTime.Unix()),
 			},
 		}
-		return nil
-	})
-}
-
-func getWgLatestHandshakes(wgi string) (peer[lastSeen], error) {
-	stdout, err := wgShowLatestHandshakes(wgi)
-	if err != nil {
-		return nil, fmt.Errorf("wg show latest-handshakes: %w", err)
 	}
-	peers, err := parseWgLatestHandshakes(stdout)
-	if err != nil {
-		return nil, fmt.Errorf("parse wg latest-handshakes: %w", err)
-	}
-	return peers, nil
+
+	return peers
 }
 
-func wgShowEndpoints(wgi string) (io.Reader, error) {
-	return wgShow(wgi, "endpoints")
-}
-
-func parseWgEndpoints(reader io.Reader) (peer[endpoints], error) {
-	return parseWg(reader, 2, func(peers peer[endpoints], fields []string) error {
-		if fields[1] == "(none)" {
-			return nil
+func getWgEndpoints(p []wgtypes.Peer) peer[endpoints] {
+	peers := make(peer[endpoints])
+	for _, peer := range p {
+		if peer.Endpoint == nil {
+			continue
 		}
-		subnet, err := ipToSubnet(fields[1])
+
+		subnet, err := ipToSubnet(peer.Endpoint.String())
 		if err != nil {
-			return fmt.Errorf("get subnet from ip: %w", err)
+			debugLog("get subnet from ip: %w", err)
+
+			continue
 		}
-		peers[fields[0]] = map[string]endpoints{
+
+		peers[peer.PublicKey.String()] = map[string]endpoints{
 			protoWireguard: {
 				Subnet: subnet,
 			},
 		}
-		return nil
-	})
-}
+	}
 
-func getWgEndpoints(wgi string) (peer[endpoints], error) {
-	stdout, err := wgShowEndpoints(wgi)
-	if err != nil {
-		return nil, fmt.Errorf("wg show endpoints: %w", err)
-	}
-	peers, err := parseWgEndpoints(stdout)
-	if err != nil {
-		return nil, fmt.Errorf("parse wg endpoints: %w", err)
-	}
-	return peers, nil
-}
-
-func parseWg[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string) error) (peer[T], error) {
-	scanner := bufio.NewScanner(reader)
-	peers := make(peer[T])
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) != nFields {
-			return nil, fmt.Errorf("invalid line: %s", line)
-		}
-		if err := fieldSetter(peers, fields); err != nil {
-			return nil, fmt.Errorf("field setter: %w", err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanner error: %w", err)
-	}
-	return peers, nil
+	return peers
 }
 
 func getOutlineSSPortAndPublicIP(myFS fs.FS, filePath string) (string, string, error) {

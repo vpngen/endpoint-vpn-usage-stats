@@ -48,7 +48,7 @@ func TestOutlineLastSeenAndEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ls, _, ep, err := parseOutlineLastSeenAndEndpoints(file, []string{"127.0.0.1/24"})
+	ls, _, ep, err := parseAuthDBLastSeenAndEndpoints(file, []string{"127.0.0.1/24"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

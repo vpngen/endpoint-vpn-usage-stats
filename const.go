@@ -5,5 +5,6 @@ const (
 	protoIPsec            = "ipsec"
 	protoOpenVPNOverCloak = "cloak-openvpn"
 	protoOutline          = "outline-ss"
-	protoOutlineOverCloak = "cloak-outline-ss"
+	protoOutlineOverCloak = "cloak-ss"
+	protoProto0           = "proto0"
 )

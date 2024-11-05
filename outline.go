@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
-	"os/exec"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +61,8 @@ func parseOutlineTraffic(reader io.Reader) (peer[traffic], error) {
 					continue
 				}
 
+				accessKey = strings.ReplaceAll(strings.ReplaceAll(accessKey, "-", "+"), "_", "/")
+
 				count := m.GetCounter().GetValue()
 
 				trfc, ok := peerTrafficMap[accessKey]
@@ -95,82 +94,34 @@ func parseOutlineTraffic(reader io.Reader) (peer[traffic], error) {
 
 // getOutlineTraffic - get outline traffic from metrics endpoint,
 // return common and loopback traffic separately.
-func getOutlineTraffic(wgi string, port string) (peer[traffic], error) {
-	cmd := exec.Command("ip", "netns", "exec", "ns"+wgi, "curl", "-s", "--max-time", "3", fmt.Sprintf("http://127.0.0.1:%s/metrics", port))
+func getOutlineTraffic(port string) (peer[traffic], error) {
+	// Create an HTTP client with a timeout
+	client := &http.Client{
+		Timeout: 3 * time.Second, // Set the timeout to 3 seconds
+	}
 
-	stdout, err := cmd.StdoutPipe()
+	// Construct the URL
+	url := fmt.Sprintf("http://127.0.0.1:%s/metrics", port)
+
+	// Make the GET request
+	resp, err := client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("pipe: %w", err)
+		return nil, fmt.Errorf("GET request failed: %w", err)
 	}
 
-	cmd.Stderr = io.Discard
+	defer resp.Body.Close()
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start: %w", err)
+	// Check for HTTP status errors
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	peers, err := parseOutlineTraffic(stdout)
+	peers, err := parseOutlineTraffic(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("parse outline traffic: %w", err)
 	}
 
-	if err := cmd.Wait(); err != nil {
-		fmt.Fprintf(os.Stderr, "cmd wait: %v\n", err)
-	}
-
 	return peers, nil
-}
-
-func parseOutlineLastSeenAndEndpoints(reader io.Reader, skip []string) (peer[lastSeen], peer[lastSeen], peer[endpoints], error) {
-	ls := make(peer[lastSeen])
-	lsp := make(peer[lastSeen])
-	ep := make(peer[endpoints])
-
-	scanner := bufio.NewScanner(reader)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		fields := strings.Fields(line)
-		if len(fields) != 4 {
-			return nil, nil, nil, fmt.Errorf("invalid line: %q", line)
-		}
-
-		peerBytes, err := base64.URLEncoding.DecodeString(fields[0])
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("b64url decode %q: %w", fields[0], err)
-		}
-
-		pub := base64.StdEncoding.EncodeToString(peerBytes)
-
-		subnet, err := ipToSubnet(fields[2])
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("get subnet from ip: %w", err)
-		}
-
-		ignore := false
-		for _, s := range skip {
-			if subnet == s {
-				ignore = true
-
-				lsp[pub] = map[string]lastSeen{protoOutlineOverCloak: {Timestamp: fields[3]}}
-
-				break
-			}
-		}
-
-		if ignore {
-			continue
-		}
-
-		ls[pub] = map[string]lastSeen{protoOutline: {Timestamp: fields[3]}}
-		ep[pub] = map[string]endpoints{protoOutline: {Subnet: subnet}}
-	}
-	if scanner.Err() != nil {
-		return nil, nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
-	}
-
-	return ls, lsp, ep, nil
 }
 
 func getOutlineLastSeenAndEndpoints(myFS fs.FS, wgi string, addr string) (peer[lastSeen], peer[lastSeen], peer[endpoints], error) {
@@ -203,7 +154,7 @@ func getOutlineLastSeenAndEndpoints(myFS fs.FS, wgi string, addr string) (peer[l
 
 	skip = append(skip, subnet)
 
-	ls, lsp, ep, err := parseOutlineLastSeenAndEndpoints(file, skip)
+	ls, lsp, ep, err := parseAuthDBLastSeenAndEndpoints(file, skip, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("parse outline last seen and endpoints: %w", err)
 	}
@@ -211,30 +162,12 @@ func getOutlineLastSeenAndEndpoints(myFS fs.FS, wgi string, addr string) (peer[l
 	return ls, lsp, ep, nil
 }
 
-func assembleOLCEndpoints(cloakEndpoints map[string]string, uidMap map[string]string, lastSeen peer[lastSeen]) (peer[endpoints], error) {
+func assembleOLCEndpoints(cloakEndpoints map[string]string, uidMap map[string]string) (peer[endpoints], error) {
 	peers := make(peer[endpoints])
-
-	lastSeenMap := lastSeen[protoOutlineOverCloak]
-	if lastSeenMap == nil {
-		return nil, nil
-	}
-
-	nextToNow := time.Now().UTC().Unix() - 2*60
 
 	for uid, key := range uidMap {
 		if subnet, ok := cloakEndpoints[uid]; ok {
-			if _, ok := lastSeen[key]; ok {
-				if t, ok := lastSeenMap[key]; ok {
-					i, err := strconv.Atoi(t.Timestamp)
-					if err != nil {
-						continue
-					}
-
-					if int64(i) > nextToNow {
-						peers[key] = map[string]endpoints{protoOutlineOverCloak: {Subnet: subnet}}
-					}
-				}
-			}
+			peers[key] = map[string]endpoints{protoOutlineOverCloak: {Subnet: subnet}}
 		}
 	}
 

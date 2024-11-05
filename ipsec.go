@@ -26,7 +26,7 @@ func parseIpsecSecrets(reader io.Reader) (map[string]string, error) {
 	return username2peer, nil
 }
 
-func parseIpsec[T any](reader io.Reader, nFields int, fieldSetter func(peer[T], []string) error) (peer[T], error) {
+func parseIpsec[T metrics](reader io.Reader, nFields int, fieldSetter func(peer[T], []string) error) (peer[T], error) {
 	scanner := bufio.NewScanner(reader)
 	// skip header
 	scanner.Scan()
@@ -84,8 +84,8 @@ func parseIpsecLastSeen(username2peer map[string]string) peer[lastSeen] {
 	return peers
 }
 
-func getIpsecTraffic(wgi string, username2peer map[string]string) (peer[traffic], error) {
-	stdout, err := runcmd("ip", "netns", "exec", "ns"+wgi, "accel-cmd", "-4", "-t", "3", "show", "sessions", "username,rx-bytes-raw,tx-bytes-raw")
+func getIpsecTraffic(username2peer map[string]string) (peer[traffic], error) {
+	stdout, err := runcmd("accel-cmd", "-4", "-t", "3", "show", "sessions", "username,rx-bytes-raw,tx-bytes-raw")
 	if err != nil {
 		return nil, fmt.Errorf("accel-cmd: %w", err)
 	}
@@ -96,8 +96,8 @@ func getIpsecTraffic(wgi string, username2peer map[string]string) (peer[traffic]
 	return peers, nil
 }
 
-func getIpsecEndpoints(wgi string, username2peer map[string]string) (peer[endpoints], error) {
-	stdout, err := runcmd("ip", "netns", "exec", "ns"+wgi, "accel-cmd", "-4", "-t", "3", "show", "sessions", "username,calling-sid")
+func getIpsecEndpoints(username2peer map[string]string) (peer[endpoints], error) {
+	stdout, err := runcmd("accel-cmd", "-4", "-t", "3", "show", "sessions", "username,calling-sid")
 	if err != nil {
 		return nil, fmt.Errorf("accel-cmd: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 )
 
@@ -51,4 +52,43 @@ func parseCloakEndpoints(authDb io.Reader) (map[string]string, error) {
 	}
 
 	return endpoints, nil
+}
+
+// getCloakPeerMaps - mapping
+// [cloak uid] -> wg public key.
+func getCloakPeerMaps(myFS fs.FS, userlist string) (map[string]string, error) {
+	uidMap := make(map[string]string)
+
+	f, err := myFS.Open(userlist)
+	if err != nil {
+		return uidMap, fmt.Errorf("open file: %w", err)
+	}
+
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Split(strings.TrimPrefix(line, "#"), " ")
+		if len(parts) != 2 {
+			// return "", "", fmt.Errorf("invalid line: %q", line)
+
+			continue
+		}
+
+		// uid -> wg public key
+		uidMap[parts[1]] = parts[0]
+	}
+
+	if err := scanner.Err(); err != nil {
+		return uidMap, fmt.Errorf("scan file: %w", err)
+	}
+
+	return uidMap, nil
 }
