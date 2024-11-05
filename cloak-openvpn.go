@@ -189,7 +189,7 @@ func assembleOpenVPNLastSeen(status map[string]openVPNStatus) peer[lastSeen] {
 	return peers
 }
 
-func assembleOVCEndpoints(cloakEndpoints map[string]string, uidMap map[string]string, status map[string]openVPNStatus) (peer[endpoints], error) {
+func assembleOVCEndpoints(cloakEndpoints map[string]string, uidMap map[string]string, status map[string]openVPNStatus) peer[endpoints] {
 	peers := make(peer[endpoints])
 
 	for uid, key := range uidMap {
@@ -200,5 +200,5 @@ func assembleOVCEndpoints(cloakEndpoints map[string]string, uidMap map[string]st
 		}
 	}
 
-	return peers, nil
+	return peers
 }
