@@ -2,15 +2,17 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 )
+
+const runCmd = "run"
 
 type appOptions struct {
 	rootFS fs.FS
@@ -30,22 +32,57 @@ func debugLog(v ...any) {
 }
 
 func main() {
-	wgInterface := flag.String("wgi", "", "wg interface, e.g. wg0, required")
-	flag.BoolVar(&debug, "debug", false, "print errors to stderr, indented json output")
-	accelCmd := flag.Bool("accel-cmd", false, "accel-cmd data required")
-
-	flag.Parse()
-
-	if *wgInterface == "" {
-		flag.Usage()
-		os.Exit(1)
-	}
-
 	var logFlags int
 	if debug {
 		logFlags = log.Lshortfile
 	}
+
 	logger = log.New(os.Stderr, "", logFlags)
+
+	// Retrieve the command-line arguments excluding the program name
+	args := os.Args[1:]
+
+	if len(args) < 2 {
+		flag.Usage()
+
+		os.Exit(1)
+	}
+
+	fl := flag.NewFlagSet(runCmd, flag.ExitOnError)
+
+	wgInterface := fl.String("wgi", "", "wg interface, e.g. wg0, required")
+	fl.BoolVar(&debug, "debug", false, "print errors to stderr, indented json output")
+	accelCmd := fl.Bool("accel-cmd", false, "accel-cmd data required")
+
+	if args[0] != runCmd {
+		fl.Parse(args)
+
+		path, err := os.Executable()
+		if err != nil {
+			logger.Fatal("executable path:", err)
+		}
+
+		newargs := []string{"netns", "exec", "ns" + *wgInterface, path, runCmd}
+		newargs = append(newargs, args...)
+
+		debugLog("run:", path, newargs)
+
+		cmd := exec.Command("ip", newargs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			logger.Fatal("run ip netns exec:", err)
+		}
+
+		os.Exit(0)
+	}
+
+	fl.Parse(args[1:])
+	if *wgInterface == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	opts := &appOptions{
 		rootFS: os.DirFS("/"),
@@ -59,6 +96,7 @@ func main() {
 					protoOpenVPNOverCloak: 0,
 					protoOutline:          1,
 					protoOutlineOverCloak: 0,
+					protoProto0:           1,
 				},
 				Traffic:   make(peer[traffic]),
 				LastSeen:  make(peer[lastSeen]),
@@ -94,6 +132,11 @@ func main() {
 		debugLog("outline-ss:", err)
 	}
 
+	// proto0
+	if err = handleProto0(opts); err != nil {
+		debugLog("proto0:", err)
+	}
+
 	opts.stats.Timestamp = strconv.FormatInt(time.Now().Unix(), 10)
 
 	// output
@@ -107,29 +150,21 @@ func main() {
 }
 
 func handleWireGuard(o *appOptions) error {
-	// wireguard
-	wgTraffic, errTraffic := getWgTransfer(o.wgi)
-	if errTraffic != nil {
-		debugLog("wg show transfer:", errTraffic)
+	peers, err := getWgPeers(o.wgi)
+	if err != nil {
+		return fmt.Errorf("wg show peers: %w", err)
 	}
+
+	// wireguard
+	wgTraffic := getWgTransfer(peers)
+	wgLastSeen := getWgLatestHandshakes(peers)
+	wgEndpoints := getWgEndpoints(peers)
 
 	mergePeers(o.stats.Data.Traffic, wgTraffic)
-
-	wgLastSeen, errLastSeen := getWgLatestHandshakes(o.wgi)
-	if errLastSeen != nil {
-		debugLog("wg show latest-handshakes:", errLastSeen)
-	}
-
 	mergePeers(o.stats.Data.LastSeen, wgLastSeen)
-
-	wgEndpoints, errEndpoints := getWgEndpoints(o.wgi)
-	if errEndpoints != nil {
-		debugLog("wg show endpoints:", errEndpoints)
-	}
-
 	mergePeers(o.stats.Data.Endpoints, wgEndpoints)
 
-	return errors.Join(errTraffic, errLastSeen, errEndpoints)
+	return nil
 }
 
 func handleIPSec(o *appOptions) error {
@@ -145,7 +180,7 @@ func handleIPSec(o *appOptions) error {
 		return fmt.Errorf("parse ipsec secrets: %w", err)
 	}
 
-	ipsecTraffic, err := getIpsecTraffic(o.wgi, username2peer)
+	ipsecTraffic, err := getIpsecTraffic(username2peer)
 	if err != nil {
 		return fmt.Errorf("ipsec traffic: %w", err)
 	}
@@ -153,7 +188,7 @@ func handleIPSec(o *appOptions) error {
 	mergePeers(o.stats.Data.Traffic, ipsecTraffic)
 	mergePeers(o.stats.Data.LastSeen, parseIpsecLastSeen(username2peer))
 
-	ipsecEndpoints, err := getIpsecEndpoints(o.wgi, username2peer)
+	ipsecEndpoints, err := getIpsecEndpoints(username2peer)
 	if err != nil {
 		return fmt.Errorf("ipsec endpoints: %w", err)
 	}
@@ -189,12 +224,7 @@ func handleOVC(o *appOptions, cloakEndpoints map[string]string) error {
 	mergePeers(o.stats.Data.Traffic, assembleOpenVPNTraffic(status))
 	mergePeers(o.stats.Data.LastSeen, assembleOpenVPNLastSeen(status))
 
-	ovpnEndpoints, err := assembleOVCEndpoints(cloakEndpoints, uidMap, status)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "openvpn endpoints: %s\n", err)
-
-		// return fmt.Errorf("openvpn endpoints: %w", err)
-	}
+	ovpnEndpoints := assembleOVCEndpoints(cloakEndpoints, uidMap, status)
 
 	mergePeers(o.stats.Data.Endpoints, ovpnEndpoints)
 
@@ -207,10 +237,11 @@ func handleOutline(o *appOptions, cloakEndpoints map[string]string) error {
 		return fmt.Errorf("get outline port: %w", err)
 	}
 
-	outlineTraffic, err := getOutlineTraffic(o.wgi, port)
+	outlineTraffic, err := getOutlineTraffic(port)
 	if err != nil {
 		return fmt.Errorf("traffic: %w", err)
 	}
+
 	mergePeers(o.stats.Data.Traffic, outlineTraffic)
 
 	outlineLastSeen, outlineCloakLastSeen, outlineEndpoints, err := getOutlineLastSeenAndEndpoints(o.rootFS, o.wgi, addr)
@@ -219,26 +250,41 @@ func handleOutline(o *appOptions, cloakEndpoints map[string]string) error {
 	}
 
 	mergePeers(o.stats.Data.LastSeen, outlineLastSeen)
+	mergePeers(o.stats.Data.LastSeen, outlineCloakLastSeen)
 	mergePeers(o.stats.Data.Endpoints, outlineEndpoints)
 
 	// over cloak.
 
-	peersReader, err := fs.ReadDir(o.rootFS, fmt.Sprintf("opt/openvpn-%s/ccd", o.wgi))
+	uidMap, err := getCloakPeerMaps(o.rootFS, fmt.Sprintf("opt/cloak-%s/userinfo/userlist", o.wgi))
 	if err != nil {
-		return fmt.Errorf("openvpn grep peers: %w", err)
+		return fmt.Errorf("cloak peer maps: %w", err)
 	}
 
-	_, uidMap, err := getOVCPeerMaps(o.rootFS, fmt.Sprintf("opt/openvpn-%s/ccd", o.wgi), peersReader)
-	if err != nil {
-		return fmt.Errorf("openvpn peer maps: %w", err)
-	}
-
-	olcEndpoints, err := assembleOLCEndpoints(cloakEndpoints, uidMap, outlineCloakLastSeen)
+	olcEndpoints, err := assembleOLCEndpoints(cloakEndpoints, uidMap)
 	if err != nil {
 		return fmt.Errorf("outline endpoints: %w", err)
 	}
 
 	mergePeers(o.stats.Data.Endpoints, olcEndpoints)
+
+	return nil
+}
+
+func handleProto0(o *appOptions) error {
+	proto0Traffic, err := getProto0Traffic()
+	if err != nil {
+		return fmt.Errorf("traffic: %w", err)
+	}
+
+	mergePeers(o.stats.Data.Traffic, proto0Traffic)
+
+	proto0LastSeen, proto0Endpoints, err := getProto0LastSeenAndEndpoints(o.rootFS, o.wgi)
+	if err != nil {
+		return fmt.Errorf("last seen and endpoints: %w", err)
+	}
+
+	mergePeers(o.stats.Data.LastSeen, proto0LastSeen)
+	mergePeers(o.stats.Data.Endpoints, proto0Endpoints)
 
 	return nil
 }

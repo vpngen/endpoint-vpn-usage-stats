@@ -14,10 +14,27 @@ type (
 		Subnet string `json:"subnet"`
 	}
 
-	proto[T any] map[string]T
+	metrics interface {
+		traffic | lastSeen | endpoints
+	}
 
-	peer[T any] map[string]proto[T]
+	// <protoname>: {
+	// 	<traffic | lastSeen | endpoints>: <value>
+	// }
+	proto[T metrics] map[string]T
 
+	// {
+	// 	<username>: {
+	// 		<protoname>: {
+	// 			<traffic | lastSeen | endpoints>: <value>
+	// 		}
+	// 	}
+	// }
+	peer[T metrics] map[string]proto[T]
+
+	// aggregated[<protoname>] is a map of aggregated flag.
+	// if aggregated flag is 0, the protocol traffic is only interactively.
+	// if aggregated flag is 1, the protocol traffic is aggregated.
 	aggregated map[string]int
 
 	data struct {

@@ -124,10 +124,7 @@ func TestOpenvpnEndpoints(t *testing.T) {
 		debugLog("cloak endpoints:", err)
 	}
 
-	ep, err := assembleOVCEndpoints(cloakEndpoints, uidMap, status)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ep := assembleOVCEndpoints(cloakEndpoints, uidMap, status)
 
 	res, err := json.MarshalIndent(ep, "", "  ")
 	if err != nil {
