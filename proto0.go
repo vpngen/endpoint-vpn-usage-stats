@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"strconv"
 	"strings"
 
@@ -20,7 +24,7 @@ func getProto0LastSeenAndEndpoints(myFS fs.FS, wgi string) (peer[lastSeen], peer
 
 	defer file.Close()
 
-	ls, _, ep, err := parseAuthDBLastSeenAndEndpoints(file, []string{}, true)
+	ls, ep, err := parseProto0AuthDBLastSeenAndEndpoints(file)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse proto0 last seen and endpoints: %w", err)
 	}
@@ -82,4 +86,40 @@ func getProto0Traffic() (peer[traffic], error) {
 	}
 
 	return peers, nil
+}
+
+func parseProto0AuthDBLastSeenAndEndpoints(reader io.Reader) (peer[lastSeen], peer[endpoints], error) {
+	ls := make(peer[lastSeen])
+	ep := make(peer[endpoints])
+
+	scanner := bufio.NewScanner(reader)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
+			return nil, nil, fmt.Errorf("invalid line: %q", line)
+		}
+
+		pub := strings.ReplaceAll(strings.ReplaceAll(fields[0], "-", "+"), "_", "/")
+		if _, err := base64.StdEncoding.DecodeString(pub); err != nil {
+			fmt.Fprintf(os.Stderr, "b64std decode %q: %s", fields[0], err)
+
+			continue
+		}
+
+		subnet, err := ipToSubnet(fields[2])
+		if err != nil {
+			return nil, nil, fmt.Errorf("get subnet from ip: %w", err)
+		}
+
+		ls[pub] = map[string]lastSeen{protoProto0: {Timestamp: fields[3]}}
+		ep[pub] = map[string]endpoints{protoProto0: {Subnet: subnet}}
+	}
+	if scanner.Err() != nil {
+		return nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
+	}
+
+	return ls, ep, nil
 }
