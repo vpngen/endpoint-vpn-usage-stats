@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -154,7 +157,7 @@ func getOutlineLastSeenAndEndpoints(myFS fs.FS, wgi string, addr string) (peer[l
 
 	skip = append(skip, subnet)
 
-	ls, lsp, ep, err := parseAuthDBLastSeenAndEndpoints(file, skip, false)
+	ls, lsp, ep, err := parseOutlineAuthDBLastSeenAndEndpoints(file, skip)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("parse outline last seen and endpoints: %w", err)
 	}
@@ -172,4 +175,56 @@ func assembleOLCEndpoints(cloakEndpoints map[string]string, uidMap map[string]st
 	}
 
 	return peers, nil
+}
+
+func parseOutlineAuthDBLastSeenAndEndpoints(reader io.Reader, skip []string) (peer[lastSeen], peer[lastSeen], peer[endpoints], error) {
+	ls := make(peer[lastSeen])
+	lsp := make(peer[lastSeen])
+	ep := make(peer[endpoints])
+
+	scanner := bufio.NewScanner(reader)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
+			return nil, nil, nil, fmt.Errorf("invalid line: %q", line)
+		}
+
+		pub := strings.ReplaceAll(strings.ReplaceAll(fields[0], "-", "+"), "_", "/")
+		if _, err := base64.StdEncoding.DecodeString(pub); err != nil {
+			fmt.Fprintf(os.Stderr, "b64std decode %q: %s", fields[0], err)
+
+			continue
+		}
+
+		subnet, err := ipToSubnet(fields[2])
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("get subnet from ip: %w", err)
+		}
+
+		ignore := false
+		for _, s := range skip {
+			if subnet == s {
+				ignore = true
+
+				lsp[pub] = map[string]lastSeen{protoOutlineOverCloak: {Timestamp: fields[3]}}
+
+				break
+			}
+		}
+
+		if ignore {
+			continue
+		}
+
+		ls[pub] = map[string]lastSeen{protoOutline: {Timestamp: fields[3]}}
+		ep[pub] = map[string]endpoints{protoOutline: {Subnet: subnet}}
+	}
+	if scanner.Err() != nil {
+		return nil, nil, nil, fmt.Errorf("scanner error: %w", scanner.Err())
+	}
+
+	return ls, lsp, ep, nil
 }
