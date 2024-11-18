@@ -100,7 +100,7 @@ func parseOutlineTraffic(reader io.Reader) (peer[traffic], error) {
 func getOutlineTraffic(port string) (peer[traffic], error) {
 	// Create an HTTP client with a timeout
 	client := &http.Client{
-		Timeout: 3 * time.Second, // Set the timeout to 3 seconds
+		Timeout: 20 * time.Second, // Set the timeout to 3 seconds
 	}
 
 	// Construct the URL
